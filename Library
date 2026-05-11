@@ -1,815 +1,718 @@
-local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local StarterGui = game:GetService("StarterGui")
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 
-local LocalPlayer = Players.LocalPlayer
-
--- Environment File System Fallbacks (For standard executors)
-local makefolder = makefolder or function() end
-local isfolder = isfolder or function() return false end
-local writefile = writefile or function() end
-local readfile = readfile or function() return "" end
-local listfiles = listfiles or function() return {} end
-local delfile = delfile or function() end
-
---------------------------------------------------------------------------------
--- 1. MAIN OBJECTS & CONFIGURATION
---------------------------------------------------------------------------------
-
-local Library = {
-	Options = {}, -- Stores active component objects for saving/loading
-	Theme = "Dark",
-	Acrylic = true,
-	MinimizeKey = Enum.KeyCode.RightShift,
-	TabWidth = 140,
-	TabHeight = 80,
-	DefaultWindowSize = UDim2.new(0, 650, 0, 350),
-	Connections = {}
+local Library = {}
+Library.Options = {
+    Theme = "Dark",
+    Acrylic = true,
+    MinimizeKey = Enum.KeyCode.RightShift,
+    TabWidth = 140,
+    TabHeight = 80,
+    DefaultWindowSize = UDim2.new(0, 650, 0, 350),
 }
+Library.Config = {}
 
-local SaveManager = {
-	Library = nil,
-	IgnoreIndexes = {},
-	Folder = "UI_Library_Configs",
-	AutoLoadFile = "autoload.txt"
-}
+local function safeIsFile(path)
+    if type(isfile) ~= "function" then
+        return false
+    end
+    local ok, result = pcall(isfile, path)
+    return ok and result
+end
 
-local InterfaceManager = {
-	Library = nil,
-	Folder = "UI_Library_Interface"
-}
+local function safeReadFile(path)
+    if type(readfile) ~= "function" then
+        return nil
+    end
+    local ok, result = pcall(readfile, path)
+    return ok and result or nil
+end
 
-Library.SaveManager = SaveManager
-Library.InterfaceManager = InterfaceManager
-
---------------------------------------------------------------------------------
--- 2. INTERNAL HELPER FUNCTIONS
---------------------------------------------------------------------------------
+local function safeWriteFile(path, content)
+    if type(writefile) ~= "function" then
+        return false, "writefile not available"
+    end
+    local ok, result = pcall(writefile, path, content)
+    return ok, result
+end
 
 local function createGui(name)
-	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-	local existing = playerGui:FindFirstChild(name)
-	if existing then
-		existing:Destroy()
-	end
+    local player = Players.LocalPlayer
+    if not player then
+        error("LocalPlayer is not available")
+    end
 
-	local screenGui = Instance.new("ScreenGui")
-	screenGui.Name = name
-	screenGui.ResetOnSpawn = false
-	screenGui.IgnoreGuiInset = true
-	screenGui.Parent = playerGui
-	return screenGui
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then
+        playerGui = Instance.new("PlayerGui")
+        playerGui.Name = "PlayerGui"
+        playerGui.Parent = player
+    end
+
+    local existing = playerGui:FindFirstChild(name)
+    if existing then
+        return existing
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = name
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.Parent = playerGui
+    return gui
 end
 
 local function createLabel(text, size, parent)
-	local label = Instance.new("TextLabel")
-	label.Size = size or UDim2.new(1, 0, 0, 24)
-	label.BackgroundTransparency = 1
-	label.Text = text
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Font = Enum.Font.SourceSansSemiBold
-	label.TextSize = 14
-	label.Parent = parent
-	return label
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = size or UDim2.new(1, 0, 0, 24)
+    label.Text = text or ""
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextScaled = true
+    label.Font = Enum.Font.SourceSansSemibold
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.Parent = parent
+    return label
 end
 
 local function createButton(title, size, parent)
-	local button = Instance.new("TextButton")
-	button.Size = size or UDim2.new(1, 0, 0, 30)
-	button.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.Font = Enum.Font.SourceSansSemiBold
-	button.TextSize = 14
-	button.Text = title
-	button.AutoButtonColor = true
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 4)
-	corner.Parent = button
-
-	button.Parent = parent
-	return button
+    local button = Instance.new("TextButton")
+    button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    button.BorderSizePixel = 0
+    button.Size = size or UDim2.new(1, 0, 0, 28)
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.Text = title or "Button"
+    button.Font = Enum.Font.SourceSansSemibold
+    button.TextSize = 16
+    button.Parent = parent
+    return button
 end
 
 local function createSectionContainer(parent)
-	local container = Instance.new("Frame")
-	container.Size = UDim2.new(1, 0, 0, 0)
-	container.BackgroundTransparency = 1
-	container.Parent = parent
+    local section = Instance.new("Frame")
+    section.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    section.BorderSizePixel = 0
+    section.Size = UDim2.new(1, 0, 0, 0)
+    section.AutomaticSize = Enum.AutomaticSize.Y
+    section.Parent = parent
 
-	local layout = Instance.new("UIListLayout")
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 8)
-	layout.Parent = container
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 6)
+    layout.Parent = section
 
-	layout.GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		container.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y)
-	end)
-
-	return container
+    return section
 end
 
 local function createControlFrame(title, parent)
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 0, 32)
-	frame.BackgroundTransparency = 1
-	frame.Parent = parent
+    local frame = Instance.new("Frame")
+    frame.BackgroundTransparency = 1
+    frame.Size = UDim2.new(1, 0, 0, 34)
+    frame.Parent = parent
 
-	local label = createLabel(title, UDim2.new(0.5, 0, 1, 0), frame)
-	label.TextXAlignment = Enum.TextXAlignment.Left
+    local name = createLabel(title, UDim2.new(0.5, 0, 1, 0), frame)
+    name.Name = "Label"
+    name.Size = UDim2.new(0.5, 0, 1, 0)
+    name.TextXAlignment = Enum.TextXAlignment.Left
 
-	return frame
+    return frame
 end
 
 local function createListFrame(parent)
-	local listFrame = Instance.new("Frame")
-	listFrame.Size = UDim2.new(1, 0, 0, 0)
-	listFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-	listFrame.Visible = false
-	listFrame.ClipsDescendants = true
-	listFrame.Parent = parent
+    local frame = Instance.new("Frame")
+    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    frame.BorderSizePixel = 0
+    frame.Size = UDim2.new(1, 0, 0, 0)
+    frame.AutomaticSize = Enum.AutomaticSize.Y
+    frame.Visible = false
+    frame.ClipsDescendants = true
+    frame.Parent = parent
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 4)
-	corner.Parent = listFrame
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 2)
+    layout.Parent = frame
 
-	local layout = Instance.new("UIListLayout")
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = listFrame
-
-	layout.GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		listFrame.Size = UDim2.new(1, 0, 0, layout.AbsoluteContentSize.Y)
-	end)
-
-	return listFrame
+    return frame
 end
 
 local function createTabButton(title, size, parent)
-	local button = createButton(title, size, parent)
-	button.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-	button.TextXAlignment = Enum.TextXAlignment.Left
-	
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 12)
-	padding.Parent = button
-
-	return button
+    local button = Instance.new("TextButton")
+    button.Name = title:gsub("%s+", "") .. "TabButton"
+    button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    button.BorderSizePixel = 0
+    button.Size = size or UDim2.new(1, 0, 0, 32)
+    button.Text = title
+    button.Font = Enum.Font.SourceSansSemibold
+    button.TextSize = 14
+    button.TextColor3 = Color3.fromRGB(220, 220, 220)
+    button.Parent = parent
+    return button
 end
 
---------------------------------------------------------------------------------
--- 3. GUI BUILDER (CORE)
---------------------------------------------------------------------------------
-
 local function seedWindow(config)
-	local windowTitle = config.Title or "Roblox UI Library"
-	local windowSize = config.Size or Library.DefaultWindowSize
+    local guiName = (config.Title or "LibraryUI") .. "Gui"
+    local gui = createGui(guiName)
 
-	local gui = createGui(windowTitle:gsub("%s+", ""))
-	
-	local windowFrame = Instance.new("Frame")
-	windowFrame.Size = windowSize
-	windowFrame.Position = UDim2.new(0.5, -windowSize.X.Offset/2, 0.5, -windowSize.Y.Offset/2)
-	windowFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
-	windowFrame.Active = true
-	windowFrame.Draggable = true -- Basic dragging enabling
-	windowFrame.Parent = gui
+    local window = Instance.new("Frame")
+    window.Name = "Window"
+    window.Size = config.Size or Library.Options.DefaultWindowSize
+    window.Position = config.Position or UDim2.new(0.5, 0, 0.5, 0)
+    window.AnchorPoint = Vector2.new(0.5, 0.5)
+    window.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    window.BorderSizePixel = 0
+    window.Parent = gui
 
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(45, 45, 50)
-	stroke.Parent = windowFrame
+    local outer = Instance.new("Frame")
+    outer.Name = "Border"
+    outer.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    outer.Size = UDim2.new(1, 1, 1, 1)
+    outer.Position = UDim2.new(0, -1, 0, -1)
+    outer.BorderSizePixel = 0
+    outer.ZIndex = 0
+    outer.Parent = window
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 6)
-	corner.Parent = windowFrame
+    local titleLabel = createLabel(config.Title or "UI Window", UDim2.new(1, 0, 0, 30), window)
+    titleLabel.Font = Enum.Font.SourceSansBold
+    titleLabel.TextSize = 18
+    titleLabel.Size = UDim2.new(1, 0, 0, 30)
+    titleLabel.TextYAlignment = Enum.TextYAlignment.Center
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Text = "  " .. (config.Title or "UI Window")
 
-	-- Title
-	local titleLabel = createLabel(windowTitle, UDim2.new(1, -20, 0, 30), windowFrame)
-	titleLabel.Position = UDim2.new(0, 10, 0, 0)
-	titleLabel.Font = Enum.Font.SourceSansBold
+    local tabBar = Instance.new("Frame")
+    tabBar.Name = "TabBar"
+    tabBar.BackgroundTransparency = 1
+    tabBar.Size = UDim2.new(1, 0, 0, Library.Options.TabHeight)
+    tabBar.Position = UDim2.new(0, 0, 0, 30)
+    tabBar.Parent = window
 
-	-- Tab Bar Container
-	local tabBar = Instance.new("ScrollingFrame")
-	tabBar.Size = UDim2.new(0, Library.TabWidth, 1, -40)
-	tabBar.Position = UDim2.new(0, 10, 0, 35)
-	tabBar.BackgroundTransparency = 1
-	tabBar.ScrollBarThickness = 2
-	tabBar.CanvasSize = UDim2.new(0, 0, 0, 0)
-	tabBar.Parent = windowFrame
+    local tabLayout = Instance.new("UIListLayout")
+    tabLayout.FillDirection = Enum.FillDirection.Horizontal
+    tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    tabLayout.Padding = UDim.new(0, 2)
+    tabLayout.Parent = tabBar
 
-	local tabLayout = Instance.new("UIListLayout")
-	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	tabLayout.Padding = UDim.new(0, 4)
-	tabLayout.Parent = tabBar
+    local contentHolder = Instance.new("Frame")
+    contentHolder.Name = "Content"
+    contentHolder.BackgroundTransparency = 1
+    contentHolder.Size = UDim2.new(1, 0, 1, -(30 + Library.Options.TabHeight))
+    contentHolder.Position = UDim2.new(0, 0, 0, 30 + Library.Options.TabHeight)
+    contentHolder.Parent = window
 
-	tabLayout.GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		tabBar.CanvasSize = UDim2.new(0, 0, 0, tabLayout.AbsoluteContentSize.Y)
-	end)
+    local contentLayout = Instance.new("UIListLayout")
+    contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    contentLayout.Padding = UDim.new(0, 6)
+    contentLayout.Parent = contentHolder
 
-	-- Content Holder
-	local contentHolder = Instance.new("Frame")
-	contentHolder.Size = UDim2.new(1, -(Library.TabWidth + 30), 1, -40)
-	contentHolder.Position = UDim2.new(0, Library.TabWidth + 20, 0, 35)
-	contentHolder.BackgroundTransparency = 1
-	contentHolder.Parent = windowFrame
+    local windowObject = {
+        Gui = gui,
+        Window = window,
+        TabButtons = {},
+        TabContents = {},
+        SelectedIndex = 0,
+    }
 
-	-- Minimize key toggle
-	local minCon = UserInputService.InputBegins:Connect(function(input, processed)
-		if not processed and input.KeyCode == Library.MinimizeKey then
-			windowFrame.Visible = not windowFrame.Visible
-		end
-	end)
-	table.insert(Library.Connections, minCon)
+    function windowObject:Show()
+        self.Window.Visible = true
+    end
 
-	return {
-		Gui = gui,
-		Window = windowFrame,
-		TabButtons = {},
-		TabContents = {},
-		SelectedIndex = 1,
-		TabBar = tabBar,
-		ContentHolder = contentHolder
-	}
+    function windowObject:Hide()
+        self.Window.Visible = false
+    end
+
+    function windowObject:Toggle()
+        self.Window.Visible = not self.Window.Visible
+    end
+
+    function windowObject:SelectTab(index)
+        for i, content in ipairs(self.TabContents) do
+            content.Frame.Visible = (i == index)
+            self.TabButtons[i].BackgroundColor3 = (i == index and Color3.fromRGB(70, 70, 70) or Color3.fromRGB(40, 40, 40))
+        end
+        self.SelectedIndex = index
+    end
+
+    function windowObject:AddTab(props)
+        local name = props.Title or "Tab"
+        local button = createTabButton(name, UDim2.new(0, Library.Options.TabWidth, 1, 0), tabBar)
+
+        local content = Instance.new("Frame")
+        content.Name = name:gsub("%s+", "") .. "Content"
+        content.BackgroundTransparency = 1
+        content.Size = UDim2.new(1, 0, 1, 0)
+        content.Visible = false
+        content.Parent = contentHolder
+
+        local contentLayout = Instance.new("UIListLayout")
+        contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        contentLayout.Padding = UDim.new(0, 8)
+        contentLayout.Parent = content
+
+        local tabObject = {
+            Button = button,
+            Content = content,
+            Name = name,
+        }
+
+        function tabObject:AddSection(title)
+            local section = createSectionContainer(self.Content)
+            local titleLabel = createLabel(title, UDim2.new(1, 0, 0, 24), section)
+            titleLabel.Font = Enum.Font.SourceSansBold
+            titleLabel.TextSize = 16
+            titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+            titleLabel.Text = title
+
+            local sectionObject = {
+                Frame = section,
+            }
+
+            function sectionObject:AddButton(props)
+                local button = createButton(props.Title or "Button", UDim2.new(1, 0, 0, 28), section)
+                if props.Tooltip then
+                    button.Tooltip = props.Tooltip
+                end
+                button.MouseButton1Click:Connect(function()
+                    if props.Callback then
+                        props.Callback()
+                    end
+                end)
+                return button
+            end
+
+            function sectionObject:AddToggle(id, props)
+                local frame = createControlFrame(props.Title or id, section)
+                local enabled = props.Default == true
+                local button = createButton(enabled and "ON" or "OFF", UDim2.new(0.3, 0, 1, 0), frame)
+                button.Position = UDim2.new(0.7, 0, 0, 0)
+                button.TextScaled = true
+                button.MouseButton1Click:Connect(function()
+                    enabled = not enabled
+                    button.Text = enabled and "ON" or "OFF"
+                    if props.Callback then
+                        props.Callback(enabled)
+                    end
+                end)
+                return frame
+            end
+
+            function sectionObject:AddDropdown(id, props)
+                local dropdownFrame = Instance.new("Frame")
+                dropdownFrame.BackgroundTransparency = 1
+                dropdownFrame.Size = UDim2.new(1, 0, 0, 30)
+                dropdownFrame.Parent = section
+
+                local label = createLabel(props.Title or id, UDim2.new(0.4, 0, 1, 0), dropdownFrame)
+                label.Text = props.Title or id
+
+                local button = createButton(tostring(props.Default or "Select"), UDim2.new(0.6, 0, 1, 0), dropdownFrame)
+                button.Position = UDim2.new(0.4, 0, 0, 0)
+                button.TextXAlignment = Enum.TextXAlignment.Left
+
+                local list = createListFrame(section)
+                local current = props.Default
+
+                local function refreshLabel()
+                    if props.Multi and type(current) == "table" then
+                        button.Text = table.concat(current, ", ")
+                    else
+                        button.Text = tostring(current)
+                    end
+                end
+
+                for _, value in ipairs(props.Values or {}) do
+                    local item = createButton(tostring(value), UDim2.new(1, 0, 0, 26), list)
+                    item.TextXAlignment = Enum.TextXAlignment.Left
+                    item.MouseButton1Click:Connect(function()
+                        if props.Multi then
+                            current = current or {}
+                            if type(current) ~= "table" then
+                                current = {current}
+                            end
+                            local found = table.find(current, value)
+                            if found then
+                                table.remove(current, found)
+                            else
+                                table.insert(current, value)
+                            end
+                        else
+                            current = value
+                            list.Visible = false
+                        end
+                        refreshLabel()
+                        if props.Callback then
+                            props.Callback(current)
+                        end
+                    end)
+                end
+
+                button.MouseButton1Click:Connect(function()
+                    list.Visible = not list.Visible
+                end)
+
+                refreshLabel()
+                return dropdownFrame
+            end
+
+            function sectionObject:AddSlider(id, props)
+                local sliderFrame = createControlFrame(props.Title or id, section)
+                local minus = createButton("-", UDim2.new(0.15, 0, 1, 0), sliderFrame)
+                minus.Position = UDim2.new(0.55, 0, 0, 0)
+                local valueLabel = createLabel(tostring(props.Default or props.Minimum or 0), UDim2.new(0.15, 0, 1, 0), sliderFrame)
+                valueLabel.Position = UDim2.new(0.7, 0, 0, 0)
+                valueLabel.TextScaled = true
+                valueLabel.TextXAlignment = Enum.TextXAlignment.Center
+                local plus = createButton("+", UDim2.new(0.15, 0, 1, 0), sliderFrame)
+                plus.Position = UDim2.new(0.85, 0, 0, 0)
+
+                local minimum = props.Minimum or 0
+                local maximum = props.Maximum or 100
+                local step = props.Rounding or 1
+                local current = props.Default or minimum
+
+                local function updateValue(newValue)
+                    current = math.clamp(newValue, minimum, maximum)
+                    valueLabel.Text = tostring(current)
+                    if props.Callback then
+                        props.Callback(current)
+                    end
+                end
+
+                minus.MouseButton1Click:Connect(function()
+                    updateValue(current - step)
+                end)
+                plus.MouseButton1Click:Connect(function()
+                    updateValue(current + step)
+                end)
+
+                return sliderFrame
+            end
+
+            function sectionObject:AddInput(id, props)
+                local inputFrame = createControlFrame(props.Title or id, section)
+                local textBox = Instance.new("TextBox")
+                textBox.Size = UDim2.new(0.6, 0, 1, 0)
+                textBox.Position = UDim2.new(0.4, 0, 0, 0)
+                textBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+                textBox.BorderSizePixel = 0
+                textBox.Text = props.Default or ""
+                textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+                textBox.PlaceholderText = props.Placeholder or ""
+                textBox.Font = Enum.Font.SourceSans
+                textBox.TextSize = 16
+                textBox.ClearTextOnFocus = false
+                textBox.Parent = inputFrame
+
+                textBox.FocusLost:Connect(function()
+                    if props.Callback then
+                        props.Callback(textBox.Text)
+                    end
+                end)
+                return inputFrame
+            end
+
+            function sectionObject:AddParagraph(props)
+                local paragraph = Instance.new("TextLabel")
+                paragraph.BackgroundTransparency = 1
+                paragraph.Size = UDim2.new(1, 0, 0, 42)
+                paragraph.Text = props.Text or props.Title or ""
+                paragraph.TextWrapped = true
+                paragraph.TextColor3 = Color3.fromRGB(235, 235, 235)
+                paragraph.Font = Enum.Font.SourceSans
+                paragraph.TextSize = 14
+                paragraph.TextXAlignment = Enum.TextXAlignment.Left
+                paragraph.TextYAlignment = Enum.TextYAlignment.Top
+                paragraph.Parent = section
+                return paragraph
+            end
+
+            return sectionObject
+        end
+
+        table.insert(self.TabButtons, button)
+        table.insert(self.TabContents, { Frame = content })
+
+        button.MouseButton1Click:Connect(function()
+            self:SelectTab(#self.TabButtons)
+        end)
+
+        return setmetatable(tabObject, {
+            __index = function(table, key)
+                return rawget(table, key)
+            end,
+        })
+    end
+
+    return windowObject
 end
 
 function Library:CreateWindow(config)
-	config = config or {}
-	local windowObj = seedWindow(config)
-	
-	function windowObj:SelectTab(index)
-		self.SelectedIndex = index
-		for i, content in ipairs(self.TabContents) do
-			content.Visible = (i == index)
-			if self.TabButtons[i] then
-				self.TabButtons[i].BackgroundColor3 = (i == index) and Color3.fromRGB(40, 40, 48) or Color3.fromRGB(20, 20, 25)
-			end
-		end
-	end
-
-	function windowObj:AddTab(props)
-		local tabTitle = props.Title or "Tab"
-		local tabIndex = #self.TabButtons + 1
-
-		local tabBtn = createTabButton(tabTitle, UDim2.new(1, 0, 0, 30), self.TabBar)
-		table.insert(self.TabButtons, tabBtn)
-
-		local contentFrame = Instance.new("ScrollingFrame")
-		contentFrame.Size = UDim2.new(1, 0, 1, 0)
-		contentFrame.BackgroundTransparency = 1
-		contentFrame.ScrollBarThickness = 4
-		contentFrame.Visible = false
-		contentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-		contentFrame.Parent = self.ContentHolder
-		table.insert(self.TabContents, contentFrame)
-
-		local contentLayout = Instance.new("UIListLayout")
-		contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		contentLayout.Padding = UDim.new(0, 12)
-		contentLayout.Parent = contentFrame
-
-		contentLayout.GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-			contentFrame.CanvasSize = UDim2.new(0, 0, 0, contentLayout.AbsoluteContentSize.Y)
-		end)
-
-		tabBtn.MouseButton1Click:Connect(function()
-			self:SelectTab(tabIndex)
-		end)
-
-		if tabIndex == 1 then
-			self:SelectTab(1)
-		end
-
-		local tabObject = { Frame = contentFrame }
-
-		function tabObject:AddSection(title)
-			local sectionFrame = Instance.new("Frame")
-			sectionFrame.Size = UDim2.new(1, -10, 0, 0)
-			sectionFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
-			sectionFrame.Parent = self.Frame
-
-			local stroke = Instance.new("UIStroke")
-			stroke.Color = Color3.fromRGB(35, 35, 40)
-			stroke.Parent = sectionFrame
-
-			local corner = Instance.new("UICorner")
-			corner.CornerRadius = UDim.new(0, 4)
-			corner.Parent = sectionFrame
-
-			local sectionTitle = createLabel("  " .. title, UDim2.new(1, 0, 0, 24), sectionFrame)
-			sectionTitle.Font = Enum.Font.SourceSansBold
-
-			local container = createSectionContainer(sectionFrame)
-			container.Position = UDim2.new(0, 8, 0, 28)
-			container.Size = UDim2.new(1, -16, 0, 0)
-
-			container.ChildAdded:Connect(function()
-				task.wait()
-				sectionFrame.Size = UDim2.new(1, -10, 0, container.Size.Y.Offset + 36)
-			end)
-			container:GetPropertyChangedSignal("Size"):Connect(function()
-				sectionFrame.Size = UDim2.new(1, -10, 0, container.Size.Y.Offset + 36)
-			end)
-
-			local sectionObject = { Container = container }
-
-			function sectionObject:AddButton(btnProps)
-				local btn = createButton(btnProps.Title or "Button", UDim2.new(1, 0, 0, 30), self.Container)
-				btn.MouseButton1Click:Connect(function()
-					if btnProps.Callback then task.spawn(btnProps.Callback) end
-				end)
-				return btn
-			end
-
-			function sectionObject:AddToggle(id, tglProps)
-				local ctrl = createControlFrame(tglProps.Title or "Toggle", self.Container)
-				local state = tglProps.Default or false
-
-				local triggerBtn = Instance.new("TextButton")
-				triggerBtn.Size = UDim2.new(0, 40, 0, 20)
-				triggerBtn.Position = UDim2.new(1, -40, 0.5, -10)
-				triggerBtn.BackgroundColor3 = state and Color3.fromRGB(65, 185, 85) or Color3.fromRGB(55, 55, 60)
-				triggerBtn.Text = state and "ON" or "OFF"
-				triggerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-				triggerBtn.Font = Enum.Font.SourceSansBold
-				triggerBtn.TextSize = 12
-				triggerBtn.Parent = ctrl
-
-				local corner = Instance.new("UICorner")
-				corner.CornerRadius = UDim.new(0, 10)
-				corner.Parent = triggerBtn
-
-				local function setState(v)
-					state = v
-					triggerBtn.BackgroundColor3 = state and Color3.fromRGB(65, 185, 85) or Color3.fromRGB(55, 55, 60)
-					triggerBtn.Text = state and "ON" or "OFF"
-					if tglProps.Callback then task.spawn(tglProps.Callback, state) end
-				end
-
-				triggerBtn.MouseButton1Click:Connect(function()
-					setState(not state)
-				end)
-
-				Library.Options[id] = {
-					Type = "Toggle",
-					Value = state,
-					Set = function(selfOpt, v) setState(v) end
-				}
-
-				-- Run init callback without explicit events trigger requirement based on standard logic
-				if tglProps.Default and tglProps.Callback then
-					task.spawn(tglProps.Callback, state)
-				end
-
-				return Library.Options[id]
-			end
-
-			function sectionObject:AddDropdown(id, dropProps)
-				local mainContainer = Instance.new("Frame")
-				mainContainer.Size = UDim2.new(1, 0, 0, 32)
-				mainContainer.BackgroundTransparency = 1
-				mainContainer.Parent = self.Container
-
-				local ctrl = createControlFrame(dropProps.Title or "Dropdown", mainContainer)
-				
-				local triggerBtn = createButton(tostring(dropProps.Default or "Select..."), UDim2.new(0.5, 0, 0, 24), ctrl)
-				triggerBtn.Position = UDim2.new(0.5, 0, 0.5, -12)
-
-				local listFrame = createListFrame(mainContainer)
-				listFrame.Position = UDim2.new(0.5, 0, 0, 30)
-				listFrame.ZIndex = 5
-
-				local multi = dropProps.Multi or false
-				local selectedValues = multi and (type(dropProps.Default) == "table" and dropProps.Default or {}) or dropProps.Default
-
-				local layout = mainContainer.Parent:FindFirstChildOfClass("UIListLayout")
-
-				local function updateLabel()
-					if multi then
-						local count = 0
-						for _ in pairs(selectedValues) do count = count + 1 end
-						triggerBtn.Text = count > 0 and (count .. " Selected") or "None"
-					else
-						triggerBtn.Text = tostring(selectedValues or "Select...")
-					end
-				end
-
-				local function processSelection(val)
-					if multi then
-						if selectedValues[val] then
-							selectedValues[val] = nil
-						else
-							selectedValues[val] = true
-						end
-						updateLabel()
-						if dropProps.Callback then task.spawn(dropProps.Callback, selectedValues) end
-					else
-						selectedValues = val
-						updateLabel()
-						listFrame.Visible = false
-						mainContainer.Size = UDim2.new(1, 0, 0, 32)
-						if dropProps.Callback then task.spawn(dropProps.Callback, selectedValues) end
-					end
-				end
-
-				local function populate(values)
-					for _, child in ipairs(listFrame:GetChildren()) do
-						if child:IsA("TextButton") then child:Destroy() end
-					end
-					for _, val in ipairs(values) do
-						local optBtn = createButton(tostring(val), UDim2.new(1, 0, 0, 24), listFrame)
-						optBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-						optBtn.ZIndex = 6
-						optBtn.MouseButton1Click:Connect(function()
-							processSelection(val)
-						end)
-					end
-				end
-
-				if dropProps.Values then populate(dropProps.Values) end
-
-				triggerBtn.MouseButton1Click:Connect(function()
-					listFrame.Visible = not listFrame.Visible
-					mainContainer.Size = listFrame.Visible and UDim2.new(1, 0, 0, 32 + listFrame.Size.Y.Offset) or UDim2.new(1, 0, 0, 32)
-				end)
-
-				listFrame:GetPropertyChangedSignal("Size"):Connect(function()
-					if listFrame.Visible then
-						mainContainer.Size = UDim2.new(1, 0, 0, 32 + listFrame.Size.Y.Offset)
-					end
-				end)
-
-				updateLabel()
-
-				Library.Options[id] = {
-					Type = "Dropdown",
-					Value = selectedValues,
-					Set = function(selfOpt, v)
-						selectedValues = v
-						updateLabel()
-						if dropProps.Callback then task.spawn(dropProps.Callback, selectedValues) end
-					end,
-					Refresh = function(selfOpt, newValues)
-						populate(newValues)
-					end
-				}
-
-				if dropProps.Default and dropProps.Callback then
-					task.spawn(dropProps.Callback, selectedValues)
-				end
-
-				return Library.Options[id]
-			end
-
-			function sectionObject:AddSlider(id, sldProps)
-				local ctrl = Instance.new("Frame")
-				ctrl.Size = UDim2.new(1, 0, 0, 45)
-				ctrl.BackgroundTransparency = 1
-				ctrl.Parent = self.Container
-
-				local title = createLabel(sldProps.Title or "Slider", UDim2.new(0.6, 0, 0, 20), ctrl)
-				local valueDisplay = createLabel(tostring(sldProps.Default or sldProps.Minimum or 0), UDim2.new(0.4, 0, 0, 20), ctrl)
-				valueDisplay.Position = UDim2.new(0.6, 0, 0, 0)
-				valueDisplay.TextXAlignment = Enum.TextXAlignment.Right
-
-				local bar = Instance.new("TextButton")
-				bar.Size = UDim2.new(1, 0, 0, 10)
-				bar.Position = UDim2.new(0, 0, 0, 25)
-				bar.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-				bar.Text = ""
-				bar.Parent = ctrl
-
-				local fill = Instance.new("Frame")
-				fill.Size = UDim2.new(0, 0, 1, 0)
-				fill.BackgroundColor3 = Color3.fromRGB(75, 120, 210)
-				fill.Parent = bar
-
-				local corner1 = Instance.new("UICorner")
-				corner1.CornerRadius = UDim.new(1, 0)
-				corner1.Parent = bar
-
-				local corner2 = corner1:Clone()
-				corner2.Parent = fill
-
-				local min = sldProps.Minimum or 0
-				local max = sldProps.Maximum or 100
-				local round = sldProps.Rounding or 0
-				local currentValue = sldProps.Default or min
-
-				local function setSlider(val)
-					val = math.clamp(val, min, max)
-					local factor = 10 ^ round
-					val = math.round(val * factor) / factor
-
-					currentValue = val
-					valueDisplay.Text = tostring(val)
-					
-					local pct = (val - min) / (max - min)
-					fill.Size = UDim2.new(pct, 0, 1, 0)
-
-					Library.Options[id].Value = val
-					if sldProps.Callback then task.spawn(sldProps.Callback, val) end
-				end
-
-				local dragging = false
-				bar.InputBegins:Connect(function(input)
-					if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end
-				end)
-				
-				local con1 = UserInputService.InputEnded:Connect(function(input)
-					if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-				end)
-				table.insert(Library.Connections, con1)
-
-				local con2 = UserInputService.InputChanged:Connect(function(input)
-					if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-						local mousePos = UserInputService:GetMouseLocation().X
-						local barPos = bar.AbsolutePosition.X
-						local barSize = bar.AbsoluteSize.X
-						local pct = math.clamp((mousePos - barPos) / barSize, 0, 1)
-						setSlider(min + (max - min) * pct)
-					end
-				end)
-				table.insert(Library.Connections, con2)
-
-				Library.Options[id] = {
-					Type = "Slider",
-					Value = currentValue,
-					Set = function(selfOpt, v) setSlider(v) end
-				}
-
-				setSlider(currentValue)
-				return Library.Options[id]
-			end
-
-			function sectionObject:AddInput(id, inpProps)
-				local ctrl = createControlFrame(inpProps.Title or "Input", self.Container)
-				
-				local textBox = Instance.new("TextBox")
-				textBox.Size = UDim2.new(0.5, 0, 0, 24)
-				textBox.Position = UDim2.new(0.5, 0, 0.5, -12)
-				textBox.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-				textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-				textBox.Font = Enum.Font.SourceSansSemiBold
-				textBox.TextSize = 14
-				textBox.PlaceholderText = inpProps.Placeholder or ""
-				textBox.Text = inpProps.Default or ""
-				textBox.ClearTextOnFocus = false
-				textBox.Parent = ctrl
-
-				local corner = Instance.new("UICorner")
-				corner.CornerRadius = UDim.new(0, 4)
-				corner.Parent = textBox
-
-				textBox.FocusLost:Connect(function()
-					Library.Options[id].Value = textBox.Text
-					if inpProps.Callback then task.spawn(inpProps.Callback, textBox.Text) end
-				end)
-
-				Library.Options[id] = {
-					Type = "Input",
-					Value = textBox.Text,
-					Set = function(selfOpt, v)
-						textBox.Text = tostring(v)
-						selfOpt.Value = textBox.Text
-						if inpProps.Callback then task.spawn(inpProps.Callback, textBox.Text) end
-					end
-				}
-
-				if inpProps.Default and inpProps.Callback and inpProps.Default ~= "" then
-					task.spawn(inpProps.Callback, inpProps.Default)
-				end
-
-				return Library.Options[id]
-			end
-
-			function sectionObject:AddParagraph(pProps)
-				local container = Instance.new("Frame")
-				container.Size = UDim2.new(1, 0, 0, 0)
-				container.BackgroundTransparency = 1
-				container.Parent = self.Container
-
-				local title = createLabel(pProps.Title or "Paragraph", UDim2.new(1, 0, 0, 20), container)
-				title.Font = Enum.Font.SourceSansBold
-
-				local content = createLabel(pProps.Content or pProps.Text or "", UDim2.new(1, 0, 0, 0), container)
-				content.Position = UDim2.new(0, 0, 0, 20)
-				content.TextWrapped = true
-				content.TextColor3 = Color3.fromRGB(180, 180, 185)
-				content.TextYAlignment = Enum.TextYAlignment.Top
-
-				-- Adjust runtime heights based on Text bounds
-				local function adjust()
-					content.Size = UDim2.new(1, 0, 0, content.TextBounds.Y + 5)
-					container.Size = UDim2.new(1, 0, 0, 20 + content.Size.Y.Offset)
-				end
-				content:GetPropertyChangedSignal("TextBounds"):Connect(adjust)
-				adjust()
-
-				return container
-			end
-
-			return sectionObject
-		end
-
-		return tabObject
-	end
-
-	-- Initialize options theme settings handling
-	Library.SaveManager:SetLibrary(Library)
-	Library.InterfaceManager:SetLibrary(Library)
-
-	return windowObj
+    self.Config = config and config.Config or {}
+    self.CurrentWindow = seedWindow(config or {})
+    self.SaveManager:SetLibrary(self)
+    self.InterfaceManager:SetLibrary(self)
+    return self.CurrentWindow
 end
-
---------------------------------------------------------------------------------
--- 4. NOTIFICATIONS
---------------------------------------------------------------------------------
 
 function Library:Notify(props)
-	local title = props.Title or "Notification"
-	local text = props.Content or props.Text or ""
-	local duration = props.Duration or 5
-
-	pcall(function()
-		StarterGui:SetCore("SendNotification", {
-			Title = title,
-			Text = text,
-			Duration = duration
-		})
-	end)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = props.Title or "Notification",
+            Text = props.Content or props.Text or "",
+            Duration = props.Duration or 5,
+        })
+    end)
 end
 
---------------------------------------------------------------------------------
--- 5. CONFIG / SAVEMANAGER IMPLEMENTATION
---------------------------------------------------------------------------------
+local SaveManager = {}
+SaveManager.Folder = "LibraryConfigs"
+SaveManager.FileName = "config.json"
+SaveManager.AutoloadFile = "autoload.json"
+SaveManager.IgnoreIndexes = {}
+SaveManager.IgnoreTheme = false
+SaveManager.AutoloadEnabled = false
+SaveManager.Library = nil
 
 function SaveManager:SetLibrary(lib)
-	self.Library = lib
+    self.Library = lib
 end
 
 function SaveManager:SetIgnoreIndexes(indexes)
-	for _, idx in ipairs(indexes) do
-		self.IgnoreIndexes[idx] = true
-	end
+    self.IgnoreIndexes = indexes or {}
 end
 
 function SaveManager:IgnoreThemeSettings()
-	self:SetIgnoreIndexes({"Theme", "Acrylic", "MinimizeKey"})
+    self.IgnoreTheme = true
 end
 
 function SaveManager:SetFolder(folder)
-	self.Folder = folder
-	if not isfolder(folder) then
-		makefolder(folder)
-	end
+    self.Folder = folder
 end
 
-function SaveManager:Save(name)
-	if not isfolder(self.Folder) then makefolder(self.Folder) end
-
-	local saveTable = {}
-	for idx, opt in pairs(self.Library.Options) do
-		if not self.IgnoreIndexes[idx] then
-			saveTable[idx] = opt.Value
-		end
-	end
-
-	local json = HttpService:JSONEncode(saveTable)
-	writefile(self.Folder .. "/" .. name .. ".json", json)
-	self.Library:Notify({ Title = "Save Manager", Content = "Successfully saved " .. name, Duration = 3 })
+function SaveManager:SetFileName(fileName)
+    self.FileName = fileName
 end
 
-function SaveManager:Load(name)
-	local path = self.Folder .. "/" .. name .. ".json"
-	local data = readfile(path)
-	if not data or data == "" then return end
+function SaveManager:SetAutoloadFile(fileName)
+    self.AutoloadFile = fileName
+end
 
-	local success, decoded = pcall(function()
-		return HttpService:JSONDecode(data)
-	end)
+function SaveManager:GetConfigPath(fileName)
+    local name = fileName or self.FileName
+    return string.format("%s/%s", self.Folder, name)
+end
 
-	if success and type(decoded) == "table" then
-		for idx, value in pairs(decoded) do
-			local opt = self.Library.Options[idx]
-			if opt and opt.Set then
-				opt:Set(value)
-			end
-		end
-		self.Library:Notify({ Title = "Save Manager", Content = "Successfully loaded " .. name, Duration = 3 })
-	else
-		self.Library:Notify({ Title = "Save Manager", Content = "Failed to decode configuration file.", Duration = 3 })
-	end
+function SaveManager:GetConfig()
+    local config = {}
+    if self.Library and self.Library.Options then
+        for key, value in pairs(self.Library.Options) do
+            if not (self.IgnoreTheme and (key == "Theme" or key == "Acrylic")) then
+                config[key] = value
+            end
+        end
+    end
+    if self.Library and self.Library.Config then
+        for key, value in pairs(self.Library.Config) do
+            config[key] = value
+        end
+    end
+    return config
+end
+
+function SaveManager:ApplyConfig(config)
+    if type(config) ~= "table" then
+        return false
+    end
+    if self.Library then
+        if self.Library.Options then
+            for key, value in pairs(config) do
+                if not (self.IgnoreTheme and (key == "Theme" or key == "Acrylic")) then
+                    self.Library.Options[key] = value
+                end
+            end
+        end
+        if self.Library.Config then
+            for key, value in pairs(config) do
+                self.Library.Config[key] = value
+            end
+        end
+    end
+    return true
+end
+
+function SaveManager:Serialize(config)
+    return HttpService:JSONEncode(config)
+end
+
+function SaveManager:Deserialize(text)
+    local ok, result = pcall(function()
+        return HttpService:JSONDecode(text)
+    end)
+    return ok and result or nil
+end
+
+function SaveManager:SaveConfig(fileName)
+    local path = self:GetConfigPath(fileName)
+    local config = self:GetConfig()
+    local json = self:Serialize(config)
+    local ok, err = safeWriteFile(path, json)
+    return ok, err
+end
+
+function SaveManager:LoadConfig(fileName)
+    local path = self:GetConfigPath(fileName)
+    if not safeIsFile(path) then
+        return nil, "Config file not found: " .. path
+    end
+    local text = safeReadFile(path)
+    if not text then
+        return nil, "Unable to read config file"
+    end
+    local config = self:Deserialize(text)
+    if not config then
+        return nil, "Invalid config format"
+    end
+    self:ApplyConfig(config)
+    return config
 end
 
 function SaveManager:LoadAutoloadConfig()
-	local autoLoadPath = self.Folder .. "/" .. self.AutoLoadFile
-	local targetFile = readfile(autoLoadPath)
-	if targetFile and targetFile ~= "" then
-		self:Load(targetFile)
-		return targetFile
-	end
-	return nil
+    return self:LoadConfig(self.AutoloadFile)
 end
 
 function SaveManager:BuildConfigSection(tab)
-	local section = tab:AddSection("Save Manager")
+    if not tab or not tab.AddSection then
+        return
+    end
 
-	local configInput = section:AddInput("SaveManager_Input", {
-		Title = "Config Name",
-		Placeholder = "MyConfig"
-	})
+    local section = tab:AddSection("Save Manager")
+    section:AddParagraph({ Text = "Use this section to save and load settings to local config files." })
 
-	local availableConfigs = {}
-	if isfolder(self.Folder) then
-		for _, file in ipairs(listfiles(self.Folder)) do
-			if file:match("%.json$") then
-				local cleaned = file:gsub("\\", "/"):match("([^/]+)%.json$")
-				if cleaned then table.insert(availableConfigs, cleaned) end
-			end
-		end
-	end
+    local fileName = self.FileName
+    local input = section:AddInput("ConfigFile", {
+        Title = "Config File",
+        Default = fileName,
+        Placeholder = "myconfig.json",
+        Callback = function(value)
+            if value and value ~= "" then
+                self.FileName = value
+                fileName = value
+            end
+        end,
+    })
 
-	local configDropdown = section:AddDropdown("SaveManager_Dropdown", {
-		Title = "Existing Configs",
-		Values = availableConfigs
-	})
+    section:AddButton({
+        Title = "Save Config",
+        Callback = function()
+            local ok, err = self:SaveConfig(fileName)
+            if ok then
+                self.Library:Notify({ Title = "Save Config", Content = "Saved " .. fileName, Duration = 4 })
+            else
+                self.Library:Notify({ Title = "Save Config", Content = "Save failed: " .. tostring(err), Duration = 6 })
+            end
+        end,
+    })
 
-	section:AddButton({
-		Title = "Save Config",
-		Callback = function()
-			local name = self.Library.Options.SaveManager_Input.Value
-			if name and name ~= "" then
-				self:Save(name)
-				-- Refresh list
-				local updated = {}
-				for _, file in ipairs(listfiles(self.Folder)) do
-					if file:match("%.json$") then
-						local cleaned = file:gsub("\\", "/"):match("([^/]+)%.json$")
-						if cleaned then table.insert(updated, cleaned) end
-					end
-				end
-				configDropdown:Refresh(updated)
-			end
-		end
-	})
+    section:AddButton({
+        Title = "Load Config",
+        Callback = function()
+            local config, err = self:LoadConfig(fileName)
+            if config then
+                self.Library:Notify({ Title = "Load Config", Content = "Loaded " .. fileName, Duration = 4 })
+            else
+                self.Library:Notify({ Title = "Load Config", Content = "Load failed: " .. tostring(err), Duration = 6 })
+            end
+        end,
+    })
 
-	section:AddButton({
-		Title = "Load Config",
-		Callback = function()
-			local name = self.Library.Options.SaveManager_Dropdown.Value
-			if name and name ~= "" then
-				self:Load(name)
-			end
-		end
-	})
+    section:AddToggle("Autoload", {
+        Title = "Autoload on Start",
+        Default = self.AutoloadEnabled,
+        Callback = function(value)
+            self.AutoloadEnabled = value
+        end,
+    })
 
-	section:AddButton({
-		Title = "Set Autoload",
-		Callback = function()
-			local name = self.Library.Options.SaveManager_Dropdown.Value
-			if name and name ~= "" then
-				writefile(self.Folder .. "/" .. self.AutoLoadFile, name)
-				self.Library:Notify({ Title = "Save Manager", Content = "Autoload set to " .. name, Duration = 3 })
-			end
-		end
-	})
+    section:AddButton({
+        Title = "Save Autoload Config",
+        Callback = function()
+            local ok, err = self:SaveConfig(self.AutoloadFile)
+            if ok then
+                self.Library:Notify({ Title = "Autoload", Content = "Autoload config saved", Duration = 4 })
+            else
+                self.Library:Notify({ Title = "Autoload", Content = "Save failed: " .. tostring(err), Duration = 6 })
+            end
+        end,
+    })
+
+    section:AddButton({
+        Title = "Load Autoload Config",
+        Callback = function()
+            local config, err = self:LoadAutoloadConfig()
+            if config then
+                self.Library:Notify({ Title = "Autoload", Content = "Autoload config loaded", Duration = 4 })
+            else
+                self.Library:Notify({ Title = "Autoload", Content = "Load failed: " .. tostring(err), Duration = 6 })
+            end
+        end,
+    })
+
+    return section
 end
 
---------------------------------------------------------------------------------
--- 6. INTERFACE MANAGER IMPLEMENTATION
---------------------------------------------------------------------------------
+local InterfaceManager = {}
+InterfaceManager.Library = nil
+InterfaceManager.Folder = nil
 
 function InterfaceManager:SetLibrary(lib)
-	self.Library = lib
+    self.Library = lib
 end
 
 function InterfaceManager:SetFolder(folder)
-	self.Folder = folder
-	if not isfolder(folder) then makefolder(folder) end
+    self.Folder = folder
 end
 
 function InterfaceManager:BuildInterfaceSection(tab)
-	local section = tab:AddSection("Interface Settings")
-	
-	section:AddDropdown("Interface_Theme", {
-		Title = "Theme",
-		Values = {"Dark", "Light", "Nord"},
-		Default = self.Library.Theme,
-		Callback = function(v)
-			self.Library.Theme = v
-			-- Advanced visual mappings can be attached to this state modification
-		end
-	})
+    if not tab or not tab.AddSection then
+        return
+    end
 
-	section:AddToggle("Interface_Acrylic", {
-		Title = "Acrylic UI",
-		Default = self.Library.Acrylic,
-		Callback = function(v)
-			self.Library.Acrylic = v
-		end
-	})
+    local section = tab:AddSection("Interface Manager")
+    section:AddParagraph({ Text = "Manage the library window interface and quick visibility actions." })
+
+    section:AddButton({
+        Title = "Toggle Window",
+        Callback = function()
+            if self.Library and self.Library.CurrentWindow then
+                self.Library.CurrentWindow:Toggle()
+            end
+        end,
+    })
+
+    section:AddButton({
+        Title = "Show Window",
+        Callback = function()
+            if self.Library and self.Library.CurrentWindow then
+                self.Library.CurrentWindow:Show()
+            end
+        end,
+    })
+
+    section:AddButton({
+        Title = "Hide Window",
+        Callback = function()
+            if self.Library and self.Library.CurrentWindow then
+                self.Library.CurrentWindow:Hide()
+            end
+        end,
+    })
+
+    return section
 end
+
+Library.SaveManager = SaveManager
+Library.InterfaceManager = InterfaceManager
 
 return Library
